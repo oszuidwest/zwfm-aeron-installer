@@ -65,7 +65,6 @@ Je hoeft voor een normale interactieve installatie geen parameters mee te geven.
 | `-ClientNetworks` | interactieve invoer | Toegestane IPv4-CIDR's voor PostgreSQL en Windows Firewall |
 | `-PgFullVersion` | `17.11-1` | Versie van de EDB PostgreSQL-installer |
 | `-MaxConnections` | `200` | Maximumaantal PostgreSQL-verbindingen |
-| `-NoAutoTune` | uit | Gebruik vaste instellingen in plaats van hardware-afhankelijke tuning |
 | `-SkipAeronInstall` | uit | Sla de interactieve AerOn-installatie over |
 
 De parameters `-PasswordFile`, `-AeronInstallerSha256` en `-PgInstallerSha256` zijn bedoeld voor testautomatisering of een gecontroleerde installerupgrade. Bekijk de parameterbeschrijvingen in `Install-Aeron.ps1` voordat je ze gebruikt.
