@@ -12,6 +12,18 @@ configures PostgreSQL, network access, and Windows Firewall.
 
 #Requires -Version 5.1
 
+[Diagnostics.CodeAnalysis.SuppressMessageAttribute(
+    'PSAvoidUsingWriteHost', '',
+    Justification = 'This is an interactive installer whose output is intentionally host-oriented.'
+)]
+[Diagnostics.CodeAnalysis.SuppressMessageAttribute(
+    'PSAvoidUsingPlainTextForPassword', 'PasswordFile',
+    Justification = 'PasswordFile is an ACL-protected file path, not a password.'
+)]
+[Diagnostics.CodeAnalysis.SuppressMessageAttribute(
+    'PSUseSingularNouns', '', Scope = 'Function', Target = 'Read-ClientNetworks|Wait-ForPostgres',
+    Justification = 'Networks is the returned collection; Postgres is the product name.'
+)]
 param(
     # Full EnterpriseDB installer version.
     [ValidatePattern('^\d+\.\d+-\d+$')]
@@ -210,7 +222,17 @@ function Test-Installer {
     }
 }
 
-function Invoke-Psql([string]$User, [string]$Password, [string]$Database, [string]$Sql) {
+function Invoke-Psql {
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute(
+        'PSAvoidUsingUsernameAndPasswordParams', '',
+        Justification = 'psql requires separate username and PGPASSWORD values.'
+    )]
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute(
+        'PSAvoidUsingPlainTextForPassword', 'Password',
+        Justification = 'The plaintext value is exposed only through PGPASSWORD for the child process.'
+    )]
+    param([string]$User, [string]$Password, [string]$Database, [string]$Sql)
+
     # Native argument quoting is unreliable in Windows PowerShell 5.1.
     # PGPASSWORD avoids a temporary trust rule.
     $sqlFile = Join-Path $env:TEMP ("aeron-setup-{0}.sql" -f ([guid]::NewGuid().ToString('N')))
@@ -275,6 +297,7 @@ function Get-AeronTuning {
         elseif ($mediaType -eq 'HDD') { $randomPageCost = '4.0' }
     } catch {
         # RAID controllers and VMs may hide the media type.
+        $randomPageCost = $null
     }
 
     return [pscustomobject]@{

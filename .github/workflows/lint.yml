@@ -1,0 +1,25 @@
+name: Lint
+
+on:
+  push:
+    paths:
+      - '**.ps1'
+      - '.github/workflows/lint.yml'
+  pull_request:
+    paths:
+      - '**.ps1'
+      - '.github/workflows/lint.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  powershell:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Run PSScriptAnalyzer
+        shell: powershell
+        run: |
+          Install-Module PSScriptAnalyzer -RequiredVersion 1.25.0 -Scope CurrentUser -Force
+          Invoke-ScriptAnalyzer -Path .\Install-Aeron.ps1 -Severity Error,Warning -EnableExit
