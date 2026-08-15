@@ -18,7 +18,7 @@ De installatie maakt:
 ## Verschillen met het legacy-installatiepad
 
 | Keuze | Reden |
-|---|---|
+| --- | --- |
 | PostgreSQL 17 op poort 5417 | Nieuwe major op een herkenbare, niet-standaardpoort |
 | SCRAM-SHA-256 | Moderne PostgreSQL-wachtwoordauthenticatie |
 | Geen tijdelijke `trust`-configuratie | Een afgebroken installatie laat geen wachtwoordloze toegang achter |
@@ -53,7 +53,7 @@ De implementatie van de toolbox is als bron van waarheid gevolgd:
 
 Daaruit volgen drie operationele eisen:
 
-- de installer moet rollen, database, `search_path`, schema-eigenaarschap en default privileges blijven aanmaken, want een schema-only dump bevat niet al die cluster- en databaseconfiguratie;
+- de installer moet rollen, database, `search_path`, schema-eigenaarschap en default privileges blijven aanmaken, want een dump van alleen schema `aeron` bevat niet al die cluster- en databaseconfiguratie;
 - een succesvolle `pg_restore --list` is alleen een structurele archiefcontrole; een volledige restoretest is de herstelgarantie;
 - lokale en remote retentie mogen niet als onafhankelijke bewaarlagen worden beschouwd.
 
@@ -63,7 +63,7 @@ Voor Docker moet `backup.path` `/backups` zijn. De voorbeeld-compose mount die m
 
 ### PostgreSQL-clientversie
 
-Een `pg_dump`-client mag niet ouder zijn dan de server-major waarop hij aansluit. Voor PostgreSQL 17 is dus clientversie 17 of nieuwer nodig. Tijdens deze review bevatte de toolbox-Dockerfile nog `postgresql16-client`. Dat is een migratieblokkade voor nieuwe PG17-backups en moet in de toolbox worden opgelost voordat de backupconfiguratie naar PG17 wijst.
+Een `pg_dump`-client mag niet ouder zijn dan de server-major waarop hij aansluit. De toolbox-Docker-image bevat PostgreSQL-client 17, gelijk aan de serverversie die dit script installeert. Bij een installatie buiten Docker moet een geschikte clientversie afzonderlijk worden geïnstalleerd.
 
 ## Verificatiestatus
 
@@ -75,12 +75,12 @@ In een wegwerp-Windows-omgeving zijn zonder productie-identificerende details ge
 - schema, `search_path`, database-ACL's en default privileges;
 - dubbele netwerkbeperking via Windows Firewall en `pg_hba.conf`;
 - succesvolle AerOn-start en schema-aanmaak op PostgreSQL 17;
-- restore van een custom-format PostgreSQL 13-dump op PostgreSQL 17;
+- restore van een custom-format dump op PostgreSQL 17;
 - functionele AerOn-start op de herstelde dataset.
 
 Nog als operationele gate uitvoeren in de echte doelomgeving:
 
-- de toolbox upgraden naar PostgreSQL 17-clienttools;
+- de versie van de PostgreSQL-clienttools in de toolbox controleren;
 - `backup.path` op `/backups` zetten wanneer Docker Compose wordt gebruikt;
 - de toolbox-host opnemen in de toegestane CIDR's;
 - een nieuwe backup vanaf PostgreSQL 17 maken;
@@ -95,6 +95,17 @@ Nog als operationele gate uitvoeren in de echte doelomgeving:
 - TLS wordt niet afgedwongen zolang clientondersteuning niet formeel is vastgesteld. De verbinding blijft beperkt tot expliciete CIDR's op een vertrouwd netwerk.
 - Het script automatiseert geen beheer van `Aeron.ini` of de AerOn-datamap.
 - Het script is bedoeld voor een verse server, niet als in-place major-upgrade.
+
+### Releasegegevens AerOn Studio
+
+De custom installer staat als asset bij GitHub-release `aeron-studio-2.1.4.14` en heeft de volgende controlewaarden:
+
+- bestand: `SetupAeron2.1.4.14.exe`;
+- grootte: `330134240` bytes;
+- SHA-256: `96be60f4fb3af07a8b0e6d4693977ca8176f1089bf492557e596865955c8ae8e`;
+- Authenticode: niet ondertekend.
+
+Het script accepteert dit bestand ook wanneer het vooraf naast `Install-Aeron.ps1` is geplaatst. Het bestand wordt pas uitgevoerd als de SHA-256 overeenkomt. Een ontbrekende of afwijkende custom build stopt de installatie.
 
 ## Publicatiecontrole
 
