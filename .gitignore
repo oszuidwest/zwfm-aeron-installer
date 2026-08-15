@@ -1,0 +1,21 @@
+# Downloaded installers (AerOn is distributed as a GitHub Release asset)
+/SetupAeron*.exe
+/postgresql-*-windows-x64.exe
+
+# Generated credentials and local automation input
+/ConnectOptions.txt
+/passwords.txt
+/*.passwords
+/.secrets/
+
+# Database backups
+*.dump
+*.backup
+
+# Local configuration and logs
+/config.json
+*.log
+
+# OS/editor metadata
+.DS_Store
+Thumbs.db
