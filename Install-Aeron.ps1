@@ -11,6 +11,7 @@ configures PostgreSQL, network access, and Windows Firewall.
 #>
 
 #Requires -Version 5.1
+#Requires -RunAsAdministrator
 
 [Diagnostics.CodeAnalysis.SuppressMessageAttribute(
     'PSAvoidUsingWriteHost', '',
@@ -25,8 +26,9 @@ configures PostgreSQL, network access, and Windows Firewall.
     Justification = 'Networks is the returned collection; Postgres is the product name.'
 )]
 param(
-    # Full EnterpriseDB installer version.
-    [ValidatePattern('^\d+\.\d+-\d+$')]
+    # Full EnterpriseDB installer version. Pinned to major 17: the install
+    # dir, data dir, port convention, and service name below all assume it.
+    [ValidatePattern('^17\.\d+-\d+$')]
     [string]$PgFullVersion = '17.11-1',
 
     [string]$PgInstallDir = 'C:\Program Files\PostgreSQL\17',
@@ -58,13 +60,26 @@ param(
     [int]$MaxConnections = 200,
 
     # Allowed IPv4 CIDRs, for example '192.168.1.0/24'. Prompts when omitted.
+    [ValidatePattern('^\d{1,3}(\.\d{1,3}){3}/\d{1,2}$')]
     [string[]]$ClientNetworks = @(),
 
     # Optional SHA-256 pin for the signed PostgreSQL installer.
     [string]$PgInstallerSha256,
+
+    # These two change as a pair on every AerOn Studio release.
+    [string]$AeronStudioVersion = '2.1.4.14',
     # Required SHA-256 pin for the unsigned AerOn installer.
     [ValidatePattern('^[0-9A-Fa-f]{64}$')]
     [string]$AeronInstallerSha256 = '96BE60F4FB3AF07A8B0E6D4693977CA8176F1089BF492557E596865955C8AE8E',
+
+    # Initial station values. AerOn 2.1.4.14 double-quotes shortname during
+    # first-run database creation; the installer repairs that failed insert.
+    [ValidateNotNullOrEmpty()]
+    [string]$RadioLongName = 'Broadcast Partners',
+    [ValidateNotNullOrEmpty()]
+    [string]$RadioShortName = 'Radio 1',
+    [ValidateNotNullOrEmpty()]
+    [string]$RadioLocation = 'Terneuzen',
 
     # ACL-protected file for automation: superuser=..., dba=..., appuser=...
     # Deleted after reading. Do not pass passwords on the command line.
@@ -75,28 +90,38 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
-$ScriptPath = $PSScriptRoot
 
 # Avoid the expensive progress UI in Windows PowerShell 5.1.
 $ProgressPreference = 'SilentlyContinue'
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 
+# Keep in sync with the ClientNetworks ValidatePattern (attribute arguments
+# cannot reference variables).
 $CidrPattern = '^\d{1,3}(\.\d{1,3}){3}/\d{1,2}$'
 
 $PgBinDir  = Join-Path $PgInstallDir 'bin'
 $Psql      = Join-Path $PgBinDir 'psql.exe'
 $PgIsReady = Join-Path $PgBinDir 'pg_isready.exe'
 
-$PgInstallerUrl  = "https://get.enterprisedb.com/postgresql/postgresql-$PgFullVersion-windows-x64.exe"
-$PgInstallerPath = Join-Path $ScriptPath "postgresql-$PgFullVersion-windows-x64.exe"
+$InstallerDownloadDir = Join-Path ([System.IO.Path]::GetTempPath()) 'zwfm-aeron-installer'
+[System.IO.Directory]::CreateDirectory($InstallerDownloadDir) | Out-Null
 
-$AeronStudioVersion = '2.1.4.14'
+# A pre-seeded installer next to the script wins (offline installs, see
+# README); downloads land in the temp directory. Every file is verified below.
+function Resolve-InstallerPath([string]$FileName) {
+    $preSeeded = Join-Path $PSScriptRoot $FileName
+    if (Test-Path $preSeeded) { $preSeeded } else { Join-Path $InstallerDownloadDir $FileName }
+}
+
+$PgInstallerUrl  = "https://get.enterprisedb.com/postgresql/postgresql-$PgFullVersion-windows-x64.exe"
+$PgInstallerPath = Resolve-InstallerPath "postgresql-$PgFullVersion-windows-x64.exe"
+
 $AeronReleaseTag = "aeron-studio-$AeronStudioVersion"
 $AeronInstallerFileName = "SetupAeron$AeronStudioVersion.exe"
 $AeronInstallerUrl = "https://github.com/oszuidwest/zwfm-aeron-installer/releases/download/$AeronReleaseTag/$AeronInstallerFileName"
-$AeronInstallerPath = Join-Path $ScriptPath $AeronInstallerFileName
+$AeronInstallerPath = Resolve-InstallerPath $AeronInstallerFileName
 
-$ConnectOptionsTxt = Join-Path $ScriptPath 'ConnectOptions.txt'
+$ConnectOptionsTxt = Join-Path ([Environment]::GetFolderPath('DesktopDirectory')) 'ConnectOptions.txt'
 
 $PostgresqlConf = Join-Path $PgDataDir 'postgresql.conf'
 $PgHbaConf      = Join-Path $PgDataDir 'pg_hba.conf'
@@ -110,23 +135,14 @@ function Write-Step([string]$Message) {
     Write-Host "==> $Message" -ForegroundColor Cyan
 }
 
-function ConvertFrom-SecureStringPlain([securestring]$Secure) {
-    $bstr = [System.Runtime.InteropServices.Marshal]::SecureStringToBSTR($Secure)
-    try {
-        return [System.Runtime.InteropServices.Marshal]::PtrToStringBSTR($bstr)
-    } finally {
-        [System.Runtime.InteropServices.Marshal]::ZeroFreeBSTR($bstr)
-    }
-}
-
 function Read-PasswordTwice([string]$Account) {
     while ($true) {
-        $pw1 = ConvertFrom-SecureStringPlain (Read-Host "Enter password for '$Account'" -AsSecureString)
+        $pw1 = [System.Net.NetworkCredential]::new('', (Read-Host "Enter password for '$Account'" -AsSecureString)).Password
         if ([string]::IsNullOrWhiteSpace($pw1)) {
             Write-Host 'Password may not be empty.' -ForegroundColor Yellow
             continue
         }
-        $pw2 = ConvertFrom-SecureStringPlain (Read-Host "Repeat password for '$Account'" -AsSecureString)
+        $pw2 = [System.Net.NetworkCredential]::new('', (Read-Host "Repeat password for '$Account'" -AsSecureString)).Password
         if ($pw1 -ne $pw2) {
             Write-Host 'Passwords do not match, try again.' -ForegroundColor Yellow
             continue
@@ -188,13 +204,13 @@ function Test-Installer {
         [string]$Path,
         [string]$ExpectedSubjectPattern,
         [string]$ExpectedSha256,
-        [bool]$RequireSignature
+        [switch]$RequireSignature
     )
     $hash = (Get-FileHash -Algorithm SHA256 -Path $Path).Hash
     Write-Host "  File    : $Path"
     Write-Host "  SHA-256 : $hash"
     if ($ExpectedSha256) {
-        if ($hash -ne $ExpectedSha256.ToUpperInvariant()) {
+        if ($hash -ne $ExpectedSha256) {
             throw "SHA-256 mismatch for $Path (expected $ExpectedSha256)"
         }
         Write-Host '  SHA-256 pin matches.'
@@ -211,8 +227,7 @@ function Test-Installer {
             if ($RequireSignature) {
                 throw "$Path is not Authenticode-signed."
             }
-            Write-Host '  WARNING : file is not Authenticode-signed (vendor Nextwave' -ForegroundColor Yellow
-            Write-Host '            Broadcast does not sign installers). The mandatory' -ForegroundColor Yellow
+            Write-Host '  WARNING : file is not Authenticode-signed; the mandatory' -ForegroundColor Yellow
             Write-Host '            SHA-256 pin is the trust anchor for this file.' -ForegroundColor Yellow
         }
         default {
@@ -231,27 +246,86 @@ function Invoke-Psql {
         'PSAvoidUsingPlainTextForPassword', 'Password',
         Justification = 'The plaintext value is exposed only through PGPASSWORD for the child process.'
     )]
-    param([string]$User, [string]$Password, [string]$Database, [string]$Sql)
+    param([string]$User, [string]$Password, [string]$Database, [string]$Sql, [switch]$Scalar)
 
     # Native argument quoting is unreliable in Windows PowerShell 5.1.
     # PGPASSWORD avoids a temporary trust rule.
-    $sqlFile = Join-Path $env:TEMP ("aeron-setup-{0}.sql" -f ([guid]::NewGuid().ToString('N')))
+    $sqlFile = (New-TemporaryFile).FullName
     Write-Utf8File -Path $sqlFile -Content $Sql
     try {
         $env:PGPASSWORD = $Password
         $env:PGCLIENTENCODING = 'UTF8'
         $psqlArgs = @('-v', 'ON_ERROR_STOP=1', '-h', $PgHost, '-p', $PgPort, '-U', $User, '-X', '-q')
+        if ($Scalar) { $psqlArgs += @('-t', '-A') }
         if ($Database) { $psqlArgs += @('-d', $Database) }
         $psqlArgs += @('-f', $sqlFile)
-        & $Psql @psqlArgs
+        $output = @(& $Psql @psqlArgs)
         if ($LASTEXITCODE -ne 0) {
             throw "psql failed (user=$User db=$Database)"
         }
+        if ($Scalar) {
+            return @($output | ForEach-Object { $_.Trim() } | Where-Object { $_ })[-1]
+        }
+        $output
     } finally {
         Remove-Item Env:PGPASSWORD -ErrorAction SilentlyContinue
         # SQL statements may contain passwords.
         Remove-Item $sqlFile -Force -ErrorAction SilentlyContinue
     }
+}
+
+function Repair-AeronInitialRadio {
+    Write-Step 'Apply AerOn 2.1.4.14 initial-radio workaround'
+    Write-Host 'AerOn may show its known SQL error before its interface becomes usable.'
+    Write-Host 'Leave this PowerShell window open; the script will repair'
+    Write-Host 'the missing radio record and restart AerOn automatically.'
+
+    for ($i = 0; $i -lt 120; $i++) {
+        $tableExists = Invoke-Psql -Scalar -User $AeronDbAdmin -Password $PwdDbAdmin -Database $PgDatabase `
+            -Sql "SELECT CASE WHEN to_regclass('$PgSchema.radio') IS NULL THEN 0 ELSE 1 END;"
+        if ($tableExists -eq '1') { break }
+        Start-Sleep -Seconds 5
+    }
+    if ($tableExists -ne '1') {
+        Write-Host 'WARNING: AerOn did not create the radio table within 10 minutes.' -ForegroundColor Yellow
+        Write-Host 'The initial-radio workaround was not applied.' -ForegroundColor Yellow
+        return
+    }
+
+    # Let AerOn finish its failing INSERT before repairing the empty table.
+    Start-Sleep -Seconds 3
+
+    $existingRadioCount = Invoke-Psql -Scalar -User $AeronDbAdmin -Password $PwdDbAdmin -Database $PgDatabase `
+        -Sql "SELECT count(*) FROM $PgSchema.radio WHERE radioid = 1;"
+    if ([int]$existingRadioCount -gt 0) {
+        Write-Host 'Radio record 1 already exists; workaround is not needed.'
+        return
+    }
+
+    Invoke-Psql -User $AeronDbAdmin -Password $PwdDbAdmin -Database $PgDatabase -Sql @"
+INSERT INTO $PgSchema.radio (radioid, longname, shortname, location)
+VALUES (1, '$(ConvertTo-SqlLiteral $RadioLongName)', '$(ConvertTo-SqlLiteral $RadioShortName)', '$(ConvertTo-SqlLiteral $RadioLocation)');
+"@
+    Write-Host "Inserted radio 1: $RadioLongName / $RadioShortName / $RadioLocation"
+
+    $aeronProcess = Get-CimInstance Win32_Process -Filter "Name = 'Aeron.exe'" |
+        Select-Object -First 1
+    if (-not $aeronProcess) {
+        Write-Host 'AerOn is not running. Start it manually to continue its setup.' -ForegroundColor Yellow
+        return
+    }
+
+    # AerOn was just launched argument-less by its own installer, so a plain
+    # relaunch of the same executable is enough.
+    Stop-Process -Id $aeronProcess.ProcessId -Force -ErrorAction SilentlyContinue
+    Start-Sleep -Seconds 1
+    $restartedAeron = Start-Process -FilePath $aeronProcess.ExecutablePath -PassThru
+    Start-Sleep -Seconds 5
+    if ($restartedAeron.HasExited) {
+        Write-Host 'WARNING: AerOn exited right after the restart; start it manually.' -ForegroundColor Yellow
+        return
+    }
+    Write-Host 'AerOn restarted successfully after applying the workaround.'
 }
 
 function Wait-ForPostgres {
@@ -261,6 +335,21 @@ function Wait-ForPostgres {
         Start-Sleep -Seconds 1
     }
     throw "PostgreSQL did not become ready on ${PgHost}:${PgPort}"
+}
+
+
+# Preflight (before the hardware detection below; CIM/storage queries are slow)
+
+if (-not [Environment]::Is64BitOperatingSystem) {
+    throw 'This script requires 64-bit Windows.'
+}
+
+if (Test-Path (Join-Path $PgDataDir 'PG_VERSION')) {
+    throw "Data directory $PgDataDir already contains a database cluster. This script only supports clean installations."
+}
+
+if (Get-Service -Name $PgServiceName -ErrorAction SilentlyContinue) {
+    throw "Service $PgServiceName already exists. This script only supports clean installations."
 }
 
 
@@ -280,12 +369,10 @@ function Get-AeronTuning {
 
     $maintenanceMB = [long][math]::Min(2047, [math]::Max(64, [math]::Floor($totalMemMB / 16)))
 
-    $maxWorkerProcesses = [math]::Max(1, $cpuCores)
-    $maxParallelWorkers = [math]::Max(1, $cpuCores)
-    $maxParallelMaintenance = [math]::Min(4, [math]::Max(1, [math]::Ceiling($cpuCores / 2)))
+    $maxParallelMaintenance = [math]::Min(4, [math]::Ceiling($cpuCores / 2))
 
     # (RAM - shared_buffers) / ((connections + parallel workers) * 3) / 2
-    $workMemMB = [long][math]::Floor((($totalMemMB - $sharedBuffersMB) / (($MaxConnections + $maxParallelWorkers) * 3)) / 2)
+    $workMemMB = [long][math]::Floor((($totalMemMB - $sharedBuffersMB) / (($MaxConnections + $cpuCores) * 3)) / 2)
     $workMemMB = [long][math]::Min(2047, [math]::Max(4, $workMemMB))
 
     $randomPageCost = $null
@@ -307,8 +394,8 @@ function Get-AeronTuning {
         EffectiveCacheMB       = $effectiveCacheMB
         MaintenanceMB          = $maintenanceMB
         WorkMemMB              = $workMemMB
-        MaxWorkerProcesses     = $maxWorkerProcesses
-        MaxParallelWorkers     = $maxParallelWorkers
+        MaxWorkerProcesses     = $cpuCores
+        MaxParallelWorkers     = $cpuCores
         MaxParallelMaintenance = $maxParallelMaintenance
         RandomPageCost         = $randomPageCost
     }
@@ -405,27 +492,9 @@ Write-Host "Data directory     : $PgDataDir"
 Write-Host "Port               : $PgPort"
 Write-Host "Service name       : $PgServiceName"
 Write-Host "Database           : $PgDatabase (schema: $PgSchema)"
+Write-Host "Initial radio      : $RadioLongName / $RadioShortName / $RadioLocation"
 Write-Host "Detected hardware  : $($Tune.TotalMemMB) MB RAM, $($Tune.CpuCores) logical cpu cores"
 Write-Host "Tuning             : shared_buffers=$($Tune.SharedBuffersMB)MB work_mem=$($Tune.WorkMemMB)MB maintenance_work_mem=$($Tune.MaintenanceMB)MB effective_cache_size=$($Tune.EffectiveCacheMB)MB"
-
-$isAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
-if (-not $isAdmin) {
-    throw 'This script requires an elevated (administrator) PowerShell.'
-}
-
-if ($env:PROCESSOR_ARCHITECTURE -ne 'AMD64') {
-    throw 'This script requires 64-bit Windows.'
-}
-
-if (Test-Path $PgDataDir) {
-    if (Test-Path (Join-Path $PgDataDir 'PG_VERSION')) {
-        throw "Data directory $PgDataDir already contains a database cluster. This script only supports clean installations."
-    }
-}
-
-if (Get-Service -Name $PgServiceName -ErrorAction SilentlyContinue) {
-    throw "Service $PgServiceName already exists. This script only supports clean installations."
-}
 
 Write-Step 'Database passwords'
 $UnattendedMode = [bool]$PasswordFile
@@ -455,8 +524,7 @@ if ($UnattendedMode) {
 }
 
 Write-Step 'Client networks'
-$invalidNets = @($ClientNetworks | Where-Object { $_ -notmatch $CidrPattern })
-if ($ClientNetworks.Count -eq 0 -or $invalidNets.Count -gt 0) {
+if ($ClientNetworks.Count -eq 0) {
     $ClientNetworks = Read-ClientNetworks
 }
 Write-Host ("Database and firewall will allow: {0} (plus localhost)" -f ($ClientNetworks -join ', '))
@@ -467,15 +535,15 @@ Get-Installer -Url $AeronInstallerUrl -OutFile $AeronInstallerPath -Name "AerOn 
 
 Write-Step 'Verify installers'
 Write-Host 'PostgreSQL installer (Authenticode signature required):'
-Test-Installer -Path $PgInstallerPath -ExpectedSubjectPattern 'EnterpriseDB' -ExpectedSha256 $PgInstallerSha256 -RequireSignature $true
-Write-Host 'AerOn Studio installer:'
-Test-Installer -Path $AeronInstallerPath -ExpectedSubjectPattern '' -ExpectedSha256 $AeronInstallerSha256 -RequireSignature $false
+Test-Installer -Path $PgInstallerPath -ExpectedSubjectPattern 'EnterpriseDB' -ExpectedSha256 $PgInstallerSha256 -RequireSignature
+Write-Host 'AerOn Studio installer (vendor Nextwave Broadcast does not sign installers):'
+Test-Installer -Path $AeronInstallerPath -ExpectedSha256 $AeronInstallerSha256
 
 Write-Step "Install PostgreSQL $PgFullVersion (unattended)"
 
 # NetworkService avoids creating a local Windows account. The temporary option
 # file contains the superuser password and is removed after installation.
-$PgOptionFile = Join-Path $env:TEMP ("aeron-pg-install-{0}.opt" -f ([guid]::NewGuid().ToString('N')))
+$PgOptionFile = (New-TemporaryFile).FullName
 $OptionFileContent = @"
 mode=unattended
 unattendedmodeui=minimal
@@ -518,9 +586,8 @@ CREATE ROLE $AeronAppRole;
 GRANT $AeronAppRole TO $AeronAppUser;
 COMMENT ON ROLE $AeronDbAdmin IS 'AerOn database owner';
 COMMENT ON ROLE $AeronAppUser IS 'AerOn operational data user';
+CREATE DATABASE $PgDatabase ENCODING UTF8 OWNER $AeronDbAdmin;
 "@
-
-Invoke-Psql -User $PgSuperUser -Password $PwdSuperUser -Database 'postgres' -Sql "CREATE DATABASE $PgDatabase ENCODING UTF8 OWNER $AeronDbAdmin;"
 
 Invoke-Psql -User $AeronDbAdmin -Password $PwdDbAdmin -Database $PgDatabase -Sql @"
 REVOKE CONNECT ON DATABASE $PgDatabase FROM public;
@@ -540,9 +607,10 @@ Write-Utf8File -Path $AeronConf -Content $AeronConfContent
 
 # AerOn's TLS support is unconfirmed, so access is CIDR-restricted without
 # requiring hostssl. See README.
-$NetworkRules = ($ClientNetworks | ForEach-Object {
-    "host      $PgDatabase   $AeronDbAdmin       $_    scram-sha-256`r`n" +
-    "host      $PgDatabase   $AeronAppUser   $_    scram-sha-256"
+$AeronHbaRules = @(foreach ($addr in (@('127.0.0.1/32') + $ClientNetworks)) {
+    foreach ($user in $AeronDbAdmin, $AeronAppUser) {
+        'host      {0,-15} {1,-15} {2,-15} scram-sha-256' -f $PgDatabase, $user, $addr
+    }
 }) -join "`r`n"
 
 $PgHbaFinalContent = @"
@@ -554,12 +622,8 @@ $PgHbaFinalContent = @"
 # Superuser access from localhost only
 host      all             $PgSuperUser        127.0.0.1/32    scram-sha-256
 
-# AerOn database access from localhost
-host      $PgDatabase   $AeronDbAdmin       127.0.0.1/32    scram-sha-256
-host      $PgDatabase   $AeronAppUser   127.0.0.1/32    scram-sha-256
-
-# AerOn database access from the allowed client networks
-$NetworkRules
+# AerOn database access from localhost and the allowed client networks
+$AeronHbaRules
 
 # IPv6 local connections
 host      all             all             ::1/128         scram-sha-256
@@ -632,24 +696,24 @@ if (-not $UnattendedMode) {
 if ($SkipAeronInstall) {
     Write-Step 'AerOn Studio installer skipped (-SkipAeronInstall)'
     Write-Host "Run it manually later: $AeronInstallerPath"
-    $AeronInstallOk = $null
+    Write-Host ''
+    Write-Host 'PostgreSQL installation completed (AerOn Studio installer skipped).' -ForegroundColor Green
 } else {
     Write-Step 'Start AerOn Studio installer'
     Write-Host 'Follow the directions in the AerOn Studio installer.'
     Write-Host "Connect AerOn Studio to the database as user $AeronDbAdmin (see ConnectOptions.txt)."
 
     $AeronProc = Start-Process -FilePath $AeronInstallerPath -Wait -PassThru
-    $AeronInstallOk = ($AeronProc.ExitCode -eq 0)
-}
-
-Write-Host ''
-if ($null -eq $AeronInstallOk) {
-    Write-Host 'PostgreSQL installation completed (AerOn Studio installer skipped).' -ForegroundColor Green
-} elseif ($AeronInstallOk) {
-    Write-Host 'PostgreSQL and AerOn Studio installation completed.' -ForegroundColor Green
-} else {
-    Write-Host "PostgreSQL installation completed, but the AerOn Studio installer exited with code $($AeronProc.ExitCode) (cancelled or failed)." -ForegroundColor Yellow
-    Write-Host "Re-run it manually: $AeronInstallerPath"
+    Write-Host ''
+    if ($AeronProc.ExitCode -eq 0) {
+        if ($AeronStudioVersion -eq '2.1.4.14') {
+            Repair-AeronInitialRadio
+        }
+        Write-Host 'PostgreSQL and AerOn Studio installation completed.' -ForegroundColor Green
+    } else {
+        Write-Host "PostgreSQL installation completed, but the AerOn Studio installer exited with code $($AeronProc.ExitCode) (cancelled or failed)." -ForegroundColor Yellow
+        Write-Host "Re-run it manually: $AeronInstallerPath"
+    }
 }
 Write-Host ''
 Write-Host 'Remaining manual steps:'

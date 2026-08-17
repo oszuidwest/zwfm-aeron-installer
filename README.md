@@ -32,7 +32,10 @@ Het script vraagt om de drie databasewachtwoorden en de toegestane IPv4-netwerke
 3. maakt het de database, het schema en de gebruikers aan;
 4. configureert het de database- en firewalltoegang;
 5. opent het `ConnectOptions.txt` met de benodigde verbindingsgegevens;
-6. start het de interactieve installer van AerOn Studio.
+6. start het de interactieve installer van AerOn Studio;
+7. herstelt het de mislukte eerste `radio`-insert van AerOn `2.1.4.14` en start het AerOn opnieuw.
+
+Laat AerOn na de installatie starten en houd het PowerShell-venster open. AerOn `2.1.4.14` kan tijdens zijn automatische database-initialisatie een SQL-fout tonen, nog voordat de interface bruikbaar is. Het script wacht op de aangemaakte `radio`-tabel, voegt alleen het ontbrekende record met `radioid = 1` toe en herstart AerOn automatisch. Bestaande radiorecords worden niet gewijzigd.
 
 Bewaar het wachtwoord van `postgres` meteen in een wachtwoordmanager. Dit wachtwoord wordt niet in `ConnectOptions.txt` of een ander bestand opgeslagen.
 
@@ -65,6 +68,9 @@ Je hoeft voor een normale interactieve installatie geen parameters mee te geven.
 | `-ClientNetworks` | interactieve invoer | Toegestane IPv4-CIDR's voor PostgreSQL en Windows Firewall |
 | `-PgFullVersion` | `17.11-1` | Versie van de EDB PostgreSQL-installer |
 | `-MaxConnections` | `200` | Maximumaantal PostgreSQL-verbindingen |
+| `-RadioLongName` | `Broadcast Partners` | Lange naam voor het eerste radiorecord |
+| `-RadioShortName` | `Radio 1` | Korte naam voor het eerste radiorecord |
+| `-RadioLocation` | `Terneuzen` | Locatie voor het eerste radiorecord |
 | `-SkipAeronInstall` | uit | Sla de interactieve AerOn-installatie over |
 
 De parameters `-PasswordFile`, `-AeronInstallerSha256` en `-PgInstallerSha256` zijn bedoeld voor testautomatisering of een gecontroleerde installerupgrade. Bekijk de parameterbeschrijvingen in `Install-Aeron.ps1` voordat je ze gebruikt.

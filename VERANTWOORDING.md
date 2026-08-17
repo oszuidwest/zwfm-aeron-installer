@@ -75,6 +75,7 @@ In een wegwerp-Windows-omgeving zijn zonder productie-identificerende details ge
 - schema, `search_path`, database-ACL's en default privileges;
 - dubbele netwerkbeperking via Windows Firewall en `pg_hba.conf`;
 - succesvolle AerOn-start en schema-aanmaak op PostgreSQL 17;
+- herstel van de foutieve eerste `radio`-insert en een foutloze AerOn-herstart;
 - restore van een custom-format dump op PostgreSQL 17;
 - functionele AerOn-start op de herstelde dataset.
 
@@ -92,6 +93,7 @@ Nog als operationele gate uitvoeren in de echte doelomgeving:
 - De benodigde custom AerOn-build `2.1.4.14` is niet door de leverancier ondertekend. Het script accepteert daarom uitsluitend de gepinde SHA-256 `96be60f4fb3af07a8b0e6d4693977ca8176f1089bf492557e596865955c8ae8e`; de EDB-installer vereist daarnaast een geldige leveranciershandtekening.
 - De custom installer is met toestemming als GitHub Release asset opgenomen. Hij blijft buiten de Git-geschiedenis vanwege zijn omvang en auteursrechtelijke status. De release-asset valt niet onder een eventuele opensourcelicentie van dit installatiescript.
 - Er is bewust geen fallback naar `SetupAeronLatest.exe`, omdat die URL momenteel een oudere build zonder de benodigde bugfix levert.
+- AerOn `2.1.4.14` genereert bij de eerste automatische database-initialisatie zelfstandig voor `shortname` ongeldige SQL (`''Radio 1''`). De fout ontstaat voordat de interface bruikbaar is; de stationwaarden zijn niet door de gebruiker via de interface ingevoerd. Het installatiescript wacht daarom op de door AerOn aangemaakte tabel, voegt uitsluitend het ontbrekende record met `radioid = 1` toe en herstart AerOn. Deze tijdelijke workaround is versiegebonden en moet verdwijnen zodra de leverancier een gecorrigeerde build levert.
 - TLS wordt niet afgedwongen zolang clientondersteuning niet formeel is vastgesteld. De verbinding blijft beperkt tot expliciete CIDR's op een vertrouwd netwerk.
 - Het script automatiseert geen beheer van `Aeron.ini` of de AerOn-datamap.
 - Het script is bedoeld voor een verse server, niet als in-place major-upgrade.
