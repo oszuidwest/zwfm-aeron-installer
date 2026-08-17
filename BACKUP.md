@@ -36,9 +36,11 @@ Gebruik minimaal de volgende instellingen in `config.json` van de toolbox:
 }
 ```
 
-Pas de bewaartermijn, planning en eventuele S3-configuratie aan het eigen beleid aan. De toolbox-Docker-image bevat PostgreSQL-client 17, gelijk aan de PostgreSQL-versie die dit installatiescript installeert.
+`config.json` bevat database- en eventueel S3-inloggegevens: houd het bestand buiten Git, mount het read-only en beperk de leesrechten op de host.
 
-Gebruik je Docker Compose, dan moet `backup.path` exact `/backups` zijn. De voorbeeldconfiguratie koppelt de persistente hostmap aan die locatie. Met `./backups` schrijft de container naar `/app/backups`; die bestanden kunnen verdwijnen wanneer de container wordt vervangen.
+Pas de bewaartermijn, planning en eventuele S3-configuratie aan je eigen beleid aan. De toolbox heeft PostgreSQL-clienttools van minimaal versie 17 nodig: de Docker-image voldoet daaraan, maar draai je de toolbox buiten Docker, installeer die tools dan zelf (achtergrond: [VERANTWOORDING.md](VERANTWOORDING.md)).
+
+Gebruik je Docker Compose, dan moet `backup.path` exact `/backups` zijn. De voorbeeldconfiguratie koppelt de persistente hostmap aan die locatie. Met `./backups` schrijft de container naar `/app/backups`; die bestanden verdwijnen wanneer de container wordt vervangen.
 
 ## Backup maken
 
@@ -58,13 +60,13 @@ curl http://localhost:8080/api/db/backup/status \
   -H "X-API-Key: <api-sleutel>"
 ```
 
-De backup is klaar wanneer `running` de waarde `false` heeft, `success` de waarde `true` heeft en een `filename` is ingevuld. Gebruik je S3, controleer dan ook afzonderlijk of `s3_sync.synced` de waarde `true` heeft.
+De backup is klaar wanneer `running` `false` is, `success` `true` is en een `filename` is ingevuld. Gebruik je S3, controleer dan ook afzonderlijk of `s3_sync.synced` `true` is.
 
 De toolbox controleert iedere nieuwe backup met `pg_restore --list`. Dat toont aan dat het archief leesbaar is, maar niet dat AerOn na een restore correct werkt. Voer daarom periodiek de volledige terugzetprocedure hieronder uit op een aparte testserver.
 
 ## Backup terugzetten
 
-Deze procedure vervangt de bestaande objecten in het schema `aeron` van de doeldatabase. Maak zo mogelijk eerst een extra backup en controleer zorgvuldig de host, poort en databasenaam.
+Deze procedure vervangt de bestaande objecten in het schema `aeron` van de doeldatabase. Maak eerst een extra backup als de doeldatabase nog bereikbaar is, en controleer host, poort en databasenaam.
 
 1. Sluit AerOn Studio en stop andere processen die naar de doeldatabase schrijven.
 
@@ -94,8 +96,8 @@ Deze procedure vervangt de bestaande objecten in het schema `aeron` van de doeld
 
 De gebruiker `aeron_app_user` heeft voldoende rechten voor de toolbox en `pg_dump`. Gebruik `aeron_dba` voor restores en schemawijzigingen.
 
-`config.json` kan database- en S3-inloggegevens bevatten. Houd dit bestand buiten Git, mount het read-only en beperk de leesrechten op de host. Zorg ook dat andere lokale gebruikers niet naar de backupmap kunnen schrijven.
+Zorg dat andere lokale gebruikers niet naar de backupmap kunnen schrijven.
 
 Lokale retentie verwijdert dezelfde backup ook uit de gekoppelde S3-opslag. Beschouw lokaal en S3 daarom niet als twee onafhankelijke bewaarlagen.
 
-[Terug naar de installatiehandleiding](README.md)
+[Terug naar de installatiehandleiding](README.md) · [Achtergrond bij het backupcontract](VERANTWOORDING.md)

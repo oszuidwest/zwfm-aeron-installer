@@ -1,6 +1,6 @@
 # Verantwoording
 
-Dit document legt de belangrijkste keuzes achter `Install-Aeron.ps1` vast. Het is bewust geschikt gemaakt voor een publieke repository: namen van personen, interne paden en netwerkdetails, productievolumes, backupobjecten en credentials zijn weggelaten.
+Dit document legt de belangrijkste keuzes achter `Install-Aeron.ps1` vast; de handleiding staat in [README.md](README.md). Het is bewust geschikt gemaakt voor een publieke repository: namen van personen, interne paden en netwerkdetails, productievolumes, backupobjecten en credentials zijn weggelaten.
 
 ## Scope
 
@@ -25,6 +25,7 @@ De installatie maakt:
 | Expliciete CIDR's in `pg_hba.conf` én Windows Firewall | Alleen bekende clients en de toolbox kunnen de database bereiken |
 | Superuser alleen vanaf localhost | Het netwerkpad heeft geen superuser nodig |
 | `ALTER DEFAULT PRIVILEGES` | AerOn-tabellen krijgen bij creatie direct de benodigde applicatierechten |
+| AerOn autovacuum- en analyze-instellingen | Lagere drempels houden tabelvervuiling en plannerstatistieken bij tijdens de continu wijzigende playout-workload |
 | Geen `synchronous_commit=off` of `wal_level=minimal` | PostgreSQL-defaults voorkomen onnodig dataverlies en houden herstelopties open |
 | Geen ingebouwde backupcode | `zwfm-aerontoolbox` bestaat al en is de operationele backupvoorziening |
 | Geen ACL-beheer voor `Aeron.ini` | Bewuste beheerkeuze voor de afgesloten doelomgeving; valt buiten dit installatiescript |
@@ -59,7 +60,7 @@ Daaruit volgen drie operationele eisen:
 
 De toolbox kan de bestaande `aeron_app_user` hergebruiken: diens tabel- en sequencerechten volstaan voor de toolboxfuncties en `pg_dump`. Voor restore en DDL blijft `aeron_dba` nodig. Een extra backuprol is daarom niet toegevoegd.
 
-Voor Docker moet `backup.path` `/backups` zijn. De voorbeeld-compose mount die map, terwijl `./backups` door de container-`WORKDIR` naar `/app/backups` verwijst en dus niet persistent is. De toolboxconfiguratie bevat secrets en de backupmap bevat alle database-inhoud; beide vereisen beperkte hostrechten.
+Voor Docker geldt de `/backups`-padvereiste uit [BACKUP.md](BACKUP.md). De toolboxconfiguratie bevat secrets en de backupmap bevat alle database-inhoud; beide vereisen beperkte hostrechten.
 
 ### PostgreSQL-clientversie
 
@@ -79,18 +80,20 @@ In een wegwerp-Windows-omgeving zijn zonder productie-identificerende details ge
 - restore van een custom-format dump op PostgreSQL 17;
 - functionele AerOn-start op de herstelde dataset.
 
-Nog als operationele gate uitvoeren in de echte doelomgeving:
+Nog niet in de echte doelomgeving geverifieerd:
 
-- de versie van de PostgreSQL-clienttools in de toolbox controleren;
-- `backup.path` op `/backups` zetten wanneer Docker Compose wordt gebruikt;
-- de toolbox-host opnemen in de toegestane CIDR's;
-- een nieuwe backup vanaf PostgreSQL 17 maken;
-- S3-status afzonderlijk controleren als S3 is ingeschakeld;
-- die backup volledig herstellen in een aparte testdatabase en functioneel openen.
+- de versie van de PostgreSQL-clienttools in de toolbox;
+- `backup.path` op `/backups` bij gebruik van Docker Compose;
+- de toolbox-host in de toegestane CIDR's;
+- een nieuwe backup vanaf PostgreSQL 17;
+- de afzonderlijke S3-status als S3 is ingeschakeld;
+- een volledig herstel van die backup in een aparte testdatabase, functioneel geopend.
+
+De uitvoering van deze controles staat beschreven in [BACKUP.md](BACKUP.md).
 
 ## Bewust geaccepteerde grenzen
 
-- De benodigde custom AerOn-build `2.1.4.14` is niet door de leverancier ondertekend. Het script accepteert daarom uitsluitend de gepinde SHA-256 `96be60f4fb3af07a8b0e6d4693977ca8176f1089bf492557e596865955c8ae8e`; de EDB-installer vereist daarnaast een geldige leveranciershandtekening.
+- De benodigde custom AerOn-build `2.1.4.14` is niet door de leverancier ondertekend. Het script accepteert daarom uitsluitend de gepinde SHA-256 uit de releasegegevens hieronder; de EDB-installer vereist daarnaast een geldige leveranciershandtekening.
 - De custom installer is met toestemming als GitHub Release asset opgenomen. Hij blijft buiten de Git-geschiedenis vanwege zijn omvang en auteursrechtelijke status. De release-asset valt niet onder een eventuele opensourcelicentie van dit installatiescript.
 - Er is bewust geen fallback naar `SetupAeronLatest.exe`, omdat die URL momenteel een oudere build zonder de benodigde bugfix levert.
 - AerOn `2.1.4.14` genereert bij de eerste automatische database-initialisatie zelfstandig voor `shortname` ongeldige SQL (`''Radio 1''`). De fout ontstaat voordat de interface bruikbaar is; de stationwaarden zijn niet door de gebruiker via de interface ingevoerd. Het installatiescript wacht daarom op de door AerOn aangemaakte tabel, voegt uitsluitend het ontbrekende record met `radioid = 1` toe en herstart AerOn. Deze tijdelijke workaround is versiegebonden en moet verdwijnen zodra de leverancier een gecorrigeerde build levert.
@@ -98,7 +101,7 @@ Nog als operationele gate uitvoeren in de echte doelomgeving:
 - Het script automatiseert geen beheer van `Aeron.ini` of de AerOn-datamap.
 - Het script is bedoeld voor een verse server, niet als in-place major-upgrade.
 
-### Releasegegevens AerOn Studio
+## Releasegegevens AerOn Studio
 
 De custom installer staat als asset bij GitHub-release `aeron-studio-2.1.4.14` en heeft de volgende controlewaarden:
 
@@ -107,7 +110,7 @@ De custom installer staat als asset bij GitHub-release `aeron-studio-2.1.4.14` e
 - SHA-256: `96be60f4fb3af07a8b0e6d4693977ca8176f1089bf492557e596865955c8ae8e`;
 - Authenticode: niet ondertekend.
 
-Het script accepteert dit bestand ook wanneer het vooraf naast `Install-Aeron.ps1` is geplaatst. Het bestand wordt pas uitgevoerd als de SHA-256 overeenkomt. Een ontbrekende of afwijkende custom build stopt de installatie.
+Het script accepteert dit bestand ook wanneer het vooraf naast `Install-Aeron.ps1` is geplaatst; ook dan geldt de SHA-256-controle en stopt een ontbrekende of afwijkende build de installatie.
 
 ## Publicatiecontrole
 

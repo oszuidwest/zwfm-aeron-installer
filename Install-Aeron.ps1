@@ -116,9 +116,8 @@ function Resolve-InstallerPath([string]$FileName) {
 $PgInstallerUrl  = "https://get.enterprisedb.com/postgresql/postgresql-$PgFullVersion-windows-x64.exe"
 $PgInstallerPath = Resolve-InstallerPath "postgresql-$PgFullVersion-windows-x64.exe"
 
-$AeronReleaseTag = "aeron-studio-$AeronStudioVersion"
 $AeronInstallerFileName = "SetupAeron$AeronStudioVersion.exe"
-$AeronInstallerUrl = "https://github.com/oszuidwest/zwfm-aeron-installer/releases/download/$AeronReleaseTag/$AeronInstallerFileName"
+$AeronInstallerUrl = "https://github.com/oszuidwest/zwfm-aeron-installer/releases/download/aeron-studio-$AeronStudioVersion/$AeronInstallerFileName"
 $AeronInstallerPath = Resolve-InstallerPath $AeronInstallerFileName
 
 $ConnectOptionsTxt = Join-Path ([Environment]::GetFolderPath('DesktopDirectory')) 'ConnectOptions.txt'
@@ -275,7 +274,7 @@ function Invoke-Psql {
 }
 
 function Repair-AeronInitialRadio {
-    Write-Step 'Apply AerOn 2.1.4.14 initial-radio workaround'
+    Write-Step "Apply AerOn $AeronStudioVersion initial-radio workaround"
     Write-Host 'AerOn may show its known SQL error before its interface becomes usable.'
     Write-Host 'Leave this PowerShell window open; the script will repair'
     Write-Host 'the missing radio record and restart AerOn automatically.'
@@ -308,18 +307,19 @@ VALUES (1, '$(ConvertTo-SqlLiteral $RadioLongName)', '$(ConvertTo-SqlLiteral $Ra
 "@
     Write-Host "Inserted radio 1: $RadioLongName / $RadioShortName / $RadioLocation"
 
-    $aeronProcess = Get-CimInstance Win32_Process -Filter "Name = 'Aeron.exe'" |
-        Select-Object -First 1
+    $aeronProcess = Get-Process -Name Aeron -ErrorAction SilentlyContinue | Select-Object -First 1
     if (-not $aeronProcess) {
         Write-Host 'AerOn is not running. Start it manually to continue its setup.' -ForegroundColor Yellow
         return
     }
 
     # AerOn was just launched argument-less by its own installer, so a plain
-    # relaunch of the same executable is enough.
-    Stop-Process -Id $aeronProcess.ProcessId -Force -ErrorAction SilentlyContinue
+    # relaunch of the same executable is enough. Capture the path first:
+    # reading it from an already-exited process throws.
+    $aeronExePath = $aeronProcess.Path
+    Stop-Process -Id $aeronProcess.Id -Force -ErrorAction SilentlyContinue
     Start-Sleep -Seconds 1
-    $restartedAeron = Start-Process -FilePath $aeronProcess.ExecutablePath -PassThru
+    $restartedAeron = Start-Process -FilePath $aeronExePath -PassThru
     Start-Sleep -Seconds 5
     if ($restartedAeron.HasExited) {
         Write-Host 'WARNING: AerOn exited right after the restart; start it manually.' -ForegroundColor Yellow
@@ -402,7 +402,7 @@ function Get-AeronTuning {
 }
 
 $Tune = Get-AeronTuning
-$TuneHeader = "# Auto-tuned for this machine: $($Tune.TotalMemMB) MB RAM, $($Tune.CpuCores) logical cpu cores"
+$HardwareSummary = "$($Tune.TotalMemMB) MB RAM, $($Tune.CpuCores) logical cpu cores"
 
 if ($Tune.RandomPageCost) {
     $RandomPageCostLine = "random_page_cost = $($Tune.RandomPageCost)"
@@ -418,7 +418,7 @@ if ($Tune.RandomPageCost) {
 $AeronConfContent = @"
 # PostgreSQL configuration file for AerOn Studio
 # Loaded from postgresql.conf via:  include_if_exists = 'aeron.conf'
-$TuneHeader
+# Auto-tuned for this machine: $HardwareSummary
 
 # Connections
 listen_addresses = '*'
@@ -467,6 +467,7 @@ log_rotation_size = 100MB
 log_min_duration_statement = 1000
 log_checkpoints = on
 log_connections = on
+log_disconnections = on
 log_line_prefix = '%t [%p]: [%l-1] %d %u %a %h '
 log_lock_waits = on
 log_temp_files = 0
@@ -478,6 +479,17 @@ client_encoding = UTF8
 tcp_keepalives_idle = 60
 tcp_keepalives_interval = 60
 tcp_keepalives_count = 10
+
+# Autovacuum and analyze (AerOn vendor settings)
+# Lower thresholds keep bloat and planner statistics current under the continuously updated playout workload.
+autovacuum_naptime = 15s
+autovacuum_vacuum_cost_limit = 1000
+autovacuum_vacuum_threshold = 40
+autovacuum_vacuum_scale_factor = 0.01
+autovacuum_analyze_threshold = 40
+autovacuum_analyze_scale_factor = 0.005
+autovacuum_vacuum_insert_threshold = 50
+autovacuum_vacuum_insert_scale_factor = 0.005
 "@
 
 
@@ -493,7 +505,7 @@ Write-Host "Port               : $PgPort"
 Write-Host "Service name       : $PgServiceName"
 Write-Host "Database           : $PgDatabase (schema: $PgSchema)"
 Write-Host "Initial radio      : $RadioLongName / $RadioShortName / $RadioLocation"
-Write-Host "Detected hardware  : $($Tune.TotalMemMB) MB RAM, $($Tune.CpuCores) logical cpu cores"
+Write-Host "Detected hardware  : $HardwareSummary"
 Write-Host "Tuning             : shared_buffers=$($Tune.SharedBuffersMB)MB work_mem=$($Tune.WorkMemMB)MB maintenance_work_mem=$($Tune.MaintenanceMB)MB effective_cache_size=$($Tune.EffectiveCacheMB)MB"
 
 Write-Step 'Database passwords'
@@ -576,12 +588,9 @@ Wait-ForPostgres
 # Use the installer's password authentication; never enable temporary trust.
 Write-Step "Create users, database $PgDatabase and schema $PgSchema"
 
-$SqlPwdDbAdmin = ConvertTo-SqlLiteral $PwdDbAdmin
-$SqlPwdAppUser = ConvertTo-SqlLiteral $PwdAppUser
-
 Invoke-Psql -User $PgSuperUser -Password $PwdSuperUser -Database 'postgres' -Sql @"
-CREATE USER $AeronDbAdmin WITH PASSWORD '$SqlPwdDbAdmin';
-CREATE USER $AeronAppUser WITH PASSWORD '$SqlPwdAppUser';
+CREATE USER $AeronDbAdmin WITH PASSWORD '$(ConvertTo-SqlLiteral $PwdDbAdmin)';
+CREATE USER $AeronAppUser WITH PASSWORD '$(ConvertTo-SqlLiteral $PwdAppUser)';
 CREATE ROLE $AeronAppRole;
 GRANT $AeronAppRole TO $AeronAppUser;
 COMMENT ON ROLE $AeronDbAdmin IS 'AerOn database owner';
@@ -649,8 +658,11 @@ Write-Host 'Configuration active; password login verified.'
 Write-Step 'Add Windows firewall rule'
 
 $FirewallRuleName = 'PostgreSQL Database Server (AerOn)'
+# A pre-existing rule can only come from a partial-failure re-run; update it
+# so the firewall stays in lockstep with the freshly written pg_hba.conf.
 if (Get-NetFirewallRule -DisplayName $FirewallRuleName -ErrorAction SilentlyContinue) {
-    Write-Host 'Firewall rule already exists; leaving it unchanged.'
+    Set-NetFirewallRule -DisplayName $FirewallRuleName -Enabled True -Protocol TCP -LocalPort $PgPort -RemoteAddress $ClientNetworks
+    Write-Host ("Existing firewall rule updated for TCP port {0}, remote addresses: {1}" -f $PgPort, ($ClientNetworks -join ', '))
 } else {
     New-NetFirewallRule -DisplayName $FirewallRuleName -Direction Inbound -Action Allow -Protocol TCP -LocalPort $PgPort -RemoteAddress $ClientNetworks | Out-Null
     Write-Host ("Firewall rule added for TCP port {0}, remote addresses: {1}" -f $PgPort, ($ClientNetworks -join ', '))
@@ -707,7 +719,14 @@ if ($SkipAeronInstall) {
     Write-Host ''
     if ($AeronProc.ExitCode -eq 0) {
         if ($AeronStudioVersion -eq '2.1.4.14') {
-            Repair-AeronInitialRadio
+            # Best effort: a workaround failure must not abort an otherwise
+            # completed installation or hide the remaining manual steps.
+            try {
+                Repair-AeronInitialRadio
+            } catch {
+                Write-Host "WARNING: the initial-radio workaround failed: $_" -ForegroundColor Yellow
+                Write-Host 'Restart AerOn Studio to let it retry its initial setup.' -ForegroundColor Yellow
+            }
         }
         Write-Host 'PostgreSQL and AerOn Studio installation completed.' -ForegroundColor Green
     } else {

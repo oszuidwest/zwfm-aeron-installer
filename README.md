@@ -25,17 +25,17 @@ Set-ExecutionPolicy Bypass -Scope Process -Force
 .\Install-Aeron.ps1
 ```
 
-Het script vraagt om de drie databasewachtwoorden en de toegestane IPv4-netwerken. Daarna:
+Het script vraagt om de drie databasewachtwoorden en de toegestane IPv4-netwerken en voert daarna deze stappen uit:
 
-1. downloadt en controleert het de installers;
-2. installeert het PostgreSQL 17 op poort `5417`;
-3. maakt het de database, het schema en de gebruikers aan;
-4. configureert het de database- en firewalltoegang;
-5. opent het `ConnectOptions.txt` met de benodigde verbindingsgegevens;
-6. start het de interactieve installer van AerOn Studio;
-7. herstelt het de mislukte eerste `radio`-insert van AerOn `2.1.4.14` en start het AerOn opnieuw.
+1. downloadt en controleert de installers;
+2. installeert PostgreSQL 17 op poort `5417`;
+3. maakt de database, het schema en de gebruikers aan;
+4. configureert de database- en firewalltoegang;
+5. opent `ConnectOptions.txt` met de benodigde verbindingsgegevens;
+6. start de interactieve installer van AerOn Studio;
+7. herstelt de mislukte eerste `radio`-insert van AerOn `2.1.4.14` en start AerOn opnieuw.
 
-Laat AerOn na de installatie starten en houd het PowerShell-venster open. AerOn `2.1.4.14` kan tijdens zijn automatische database-initialisatie een SQL-fout tonen, nog voordat de interface bruikbaar is. Het script wacht op de aangemaakte `radio`-tabel, voegt alleen het ontbrekende record met `radioid = 1` toe en herstart AerOn automatisch. Bestaande radiorecords worden niet gewijzigd.
+Laat AerOn na de installatie starten en houd het PowerShell-venster open. AerOn `2.1.4.14` kan tijdens zijn automatische database-initialisatie een SQL-fout tonen, nog voordat de interface bruikbaar is; het script herstelt dit zelf en laat bestaande radiorecords ongemoeid. Meldt het script dat de workaround niet is toegepast, start AerOn Studio dan handmatig opnieuw.
 
 Bewaar het wachtwoord van `postgres` meteen in een wachtwoordmanager. Dit wachtwoord wordt niet in `ConnectOptions.txt` of een ander bestand opgeslagen.
 
@@ -43,7 +43,7 @@ De gebruikte AerOn-versie is de gepinde custom build `2.1.4.14`. De achtergrond 
 
 ## Na de installatie
 
-1. Bewaar de wachtwoorden uit `ConnectOptions.txt` in een wachtwoordmanager.
+1. Bewaar de twee applicatiewachtwoorden uit `ConnectOptions.txt` in een wachtwoordmanager.
 2. Start AerOn Studio en maak verbinding met:
 
    | Instelling | Waarde          |
@@ -57,7 +57,7 @@ De gebruikte AerOn-versie is de gepinde custom build `2.1.4.14`. De achtergrond 
 4. Verwijder `ConnectOptions.txt` zodra AerOn en de toolbox zijn ingesteld.
 5. Richt de backups in volgens [BACKUP.md](BACKUP.md) en voer een restoretest uit voordat de server in productie gaat.
 
-`ConnectOptions.txt` is een tijdelijk bestand met gevoelige informatie. Het staat in `.gitignore` en krijgt beperkte bestandsrechten, maar moet na gebruik alsnog worden verwijderd.
+`ConnectOptions.txt` is een tijdelijk bestand met gevoelige informatie en staat op het bureaublad van de installerende gebruiker. Het staat in `.gitignore` en krijgt beperkte bestandsrechten, maar dat vervangt het verwijderen niet.
 
 ## Veelgebruikte parameters
 
@@ -71,9 +71,9 @@ Je hoeft voor een normale interactieve installatie geen parameters mee te geven.
 | `-RadioLongName` | `Broadcast Partners` | Lange naam voor het eerste radiorecord |
 | `-RadioShortName` | `Radio 1` | Korte naam voor het eerste radiorecord |
 | `-RadioLocation` | `Terneuzen` | Locatie voor het eerste radiorecord |
-| `-SkipAeronInstall` | uit | Sla de interactieve AerOn-installatie over |
+| `-SkipAeronInstall` | uit | Download en verifieer AerOn Studio, maar start de installer niet |
 
-De parameters `-PasswordFile`, `-AeronInstallerSha256` en `-PgInstallerSha256` zijn bedoeld voor testautomatisering of een gecontroleerde installerupgrade. Bekijk de parameterbeschrijvingen in `Install-Aeron.ps1` voordat je ze gebruikt.
+De parameters `-PasswordFile` en `-PgInstallerSha256` zijn bedoeld voor testautomatisering of een gecontroleerde installerupgrade; `-AeronStudioVersion` en `-AeronInstallerSha256` wijzigen samen bij iedere AerOn-release. Bekijk de parameterbeschrijvingen in `Install-Aeron.ps1` voordat je ze gebruikt.
 
 ## Beheer
 
@@ -85,7 +85,7 @@ De parameters `-PasswordFile`, `-AeronInstallerSha256` en `-PgInstallerSha256` z
 | PostgreSQL-log  | `C:\Aeron Database\PostgreSQL\17\Database\log` |
 | Configuratie    | `aeron.conf` en `pg_hba.conf` in de datamap    |
 
-Verandert het netwerkadres van een AerOn-client of de toolbox? Pas dan zowel `pg_hba.conf` als de Windows Firewall-regel aan. De PostgreSQL-superuser blijft alleen vanaf de server zelf bereikbaar.
+Verandert het netwerkadres van een AerOn-client of de toolbox? Pas dan zowel `pg_hba.conf` als de Windows Firewall-regel aan en herstart daarna de service `postgresql-17-x64-aeron`. De PostgreSQL-superuser blijft alleen vanaf de server zelf bereikbaar.
 
 ## Meer informatie
 
